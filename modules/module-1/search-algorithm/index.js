@@ -1,10 +1,11 @@
-
-
-export const handler = async (event, context) => {
+export const handler = async (event) => {
+    const {rawQueryString} = event
     
-    const {body} = event;
-    console.log("EVENT: \n" + JSON.stringify(event, null, 2));
-    
-    return context.logStreamName;
+    console.log("Query string: " + rawQueryString)
+    const response = {
+      statusCode: 200,
+      body: JSON.stringify(event, null, 2),
+    };
+    return response;
   };
   

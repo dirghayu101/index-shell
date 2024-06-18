@@ -13,3 +13,16 @@ I don't need to worry about Lambda's networking. I just have to create a connect
 Reference: https://docs.aws.amazon.com/lambda/latest/dg/foundation-networking.html
 
 4. I will start configuring open search.
+
+5. Realized the approach is a bit wrong. Got feedback, we haven't done shit. Very negative feedback about our overall progress.
+
+New plan: I will do the backend.
+
+Backend workflow:
+- Lambda Function for login and sign-up with endpoints.
+- Dynamo DB corresponding for storing data.
+
+
+DocumentDB cluster name: capstone-docDB-cluster-trial
+DocumentDB username: capuser
+Password: ^2*M!sdkj*(hfIsl#9-kdf)
