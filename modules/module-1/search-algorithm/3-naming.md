@@ -1,7 +1,0 @@
-- Lambda Login Function Name: capstone-post-login
-- Lambda Sign-up Function Name: capstone-post-signup
-- VPC Name: capstone-vpc (10.89.0.0/16)
-- Subnet Name 1: private-general-use-subnet
-- Subnet Name 2: public-general-use-subnet
-- IGW: capstone-igw
-- 
