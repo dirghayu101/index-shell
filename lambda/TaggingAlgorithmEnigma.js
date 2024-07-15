@@ -1,5 +1,5 @@
 /* 
-                                TaggingAlgorithmEnigma.js
+                        TaggingAlgorithmEnigma.js
 
 Performs tagging of received snippet and also generate a summary. This will be same for the same snippet.
 
@@ -38,6 +38,22 @@ If a user wants to perform a search, we will first perform the search in the use
 
     What if there is already an entry? -> Put a check for this.
 
+# Assumption:
+    - Snippet and SnippetID are immutable once inserted in either DB.
+    - A snippet can only be inserted in the UserModel Database only after it has been inserted in the SnippetModel database.
+
+# Validations for the received command:
+    - Frontend 'text value required'
+    - Backend 'LLM check'
+    - Exist check.
+
+# This method use cases:
+    - User made a post request for inserting a new command. tag-array or summary has been provided. No copy in user and snippet model.
+    - User made a post request for inserting a new command. tag-array or summary has not been provided. No copy in user and snippet model.
+    - User made a post request for inserting a new command. But the command only exist in the snippet model. So, a copy will be made in the user model.
+    - User made a post request for inserting a new command. The command  exist in both the snippet and the user model. tag-array or summary has been provided -> so these will be updated.
+    - User made a post request for inserting a new command. The command  exist in both the snippet and the user model. tag-array or summary has not been provided -> so nothing happens.
+ 
 
 - Dirghayu Joshi
 */
@@ -45,64 +61,16 @@ If a user wants to perform a search, we will first perform the search in the use
 const randomBytes = require('crypto').randomBytes;
 const AWS = require('aws-sdk');
 const ddb = new AWS.DynamoDB.DocumentClient();
-
-/*
-const fleet = [
-    {
-        Name: 'Angel',
-        Color: 'White',
-        Gender: 'Female',
-    },
-    {
-        Name: 'Gil',
-        Color: 'White',
-        Gender: 'Male',
-    },
-    {
-        Name: 'Rocinante',
-        Color: 'Yellow',
-        Gender: 'Female',
-    },
-];
-*/
-class SnippetModel {
-    constructor(snippetId, command, summary, tagArray) {
-        if (typeof snippetId !== 'string') throw new Error('snippetId must be a string');
-        if (typeof command !== 'string') throw new Error('command must be a string');
-        if (typeof summary !== 'string') throw new Error('summary must be a string');
-        if (!Array.isArray(tagArray) || !tagArray.every(tag => typeof tag === 'string')) {
-            throw new Error('tagArray must be an array of strings');
-        }
-
-        this.snippetId = snippetId;
-        this.command = command;
-        this.summary = summary;
-        this.tagArray = tagArray;
-    }
-
-    toItem() {
-        return {
-            snippetId: this.snippetId,
-            command: this.command,
-            summary: this.summary,
-            'tag-array': this.tagArray
-        };
-    }
-}
-
-class UserModel {
-    constructor(email, snippetArray){
-
-    }
-}
+const {SnippetModel} = require('./SnippetModel')
+const {UserModel} = require('./UserModel')
 
 
-exports.handler = (event, context, callback) => {
+
+exports.handler = async (event, context, callback) => {
     if (!event.requestContext.authorizer) {
       errorResponse('Authorization not configured', context.awsRequestId, callback);
       return;
     }
-
     const snippetId = toUrlString(randomBytes(16));
     console.log('Received event (', snippetId, '): ', event);
 
@@ -110,20 +78,72 @@ exports.handler = (event, context, callback) => {
     // included in the authentication token are provided in the request context.
     // This includes the username as well as other attributes.
     const email = event.requestContext.authorizer.claims['cognito:email'];
-    console.log('Current user: ', username);
+    console.log('Current user: ', email);
+    
+    
+    
     // The body field of the event in a proxy integration is a raw string.
     // In order to extract meaningful values, we need to first parse this string
     // into an object. A more robust implementation might inspect the Content-Type
     // header first and use a different parsing strategy based on that value.
-    // Summary and Tag Array should be the components. 
     const requestBody = JSON.parse(event?.body);
+    
+    // TODO: LLM integration to generate values here.
+    // TODO: Default values supplied by the user to be saved for insertion in the User Model.
+    // TODO: Validation for the received command.
+    const receivedCommand = requestBody?.command;
+    const receivedSummary = requestBody?.summary || '';
+    const receivedTagArray = requestBody?.tagArray?.split(',') || [];
+    let generatedCommand, generatedSummary = ''
+    let generatedTagArray = []
+    
+    // What if command already exist in the Snippet database?
+    // If there will be any tag value or summary value sent along with command, those will be inserted in the user model along with command, if there already is a definition in the user model as well, then just override it with the latest received definition of summary, and append new tag values at the top of the array.
 
-    const pickupLocation = requestBody.PickupLocation;
-    const command = requestBody?.command;
-    const summary = requestBody?.summary;
-    const tagArray = requestBody?.tagArray?.split(',') || [];
+    
 
-    const unicorn = findUnicorn(pickupLocation);
+    // A snippet can only be inserted in the UserModel Database only after it has been inserted in the SnippetModel database.
+
+    // Checks in snippet model.
+    let tempKey = await checkIfSnippetExists(receivedCommand); // null || undefined if snippet exist, existing snippet key otherwise.
+
+    if(!tempKey){
+        // Snippet doesn't exist.
+        // TODO: LLM call to generate below values will be made here.
+        generatedCommand = '';
+        generatedSummary = '';
+        generatedTagArray = []
+
+        await createSnippet(snippetId, generatedCommand, generatedSummary, generatedTagArray);
+    } else{
+        snippetId = tempKey;
+    }
+
+    // At this point. Snippet should exist regardless. We only have to worry about Snippet Model here.
+
+    if(receivedSummary || receivedTagArray.length){
+        
+        // Check if user exist and if it doesn't then create one.
+        const tempUserStore =  await checkIfUserExists(email); // null if it doesn't
+        !tempUserStore ? await createUser(email) : undefined;
+        
+        //insertion in user model if either received summary or tag array in post request. If snippet exist override otherwise create new.
+        
+        const userModelSummary = receivedSummary || generatedSummary;
+        const userModelTagArray = []; //TODO: append to the existing.
+        const snippetData = new SnippetModel(snippetId, generatedCommand, userModelSummary, userModelTagArray);
+
+        if(await checkIfSnippetExistsUser(email, snippetId)){
+            // exist.
+            await updateSnippetUserModel(email, snippetId, userModelTagArray, userModelSummary, tempUserStore);
+
+        } else {
+            // insert here.
+            tempUserStore.snippetArray.push(snippetData)
+            await updateUser(tempUserStore)
+        }
+    }    
+
 
     recordRide(rideId, username, unicorn).then(() => {
         // You can use the callback function to provide a return value from your Node.js
@@ -155,32 +175,145 @@ exports.handler = (event, context, callback) => {
     });
 };
 
-// This is where you would implement logic to find the optimal unicorn for
-// this ride (possibly invoking another Lambda function as a microservice.)
-// For simplicity, we'll just pick a unicorn at random.
-function findUnicorn(pickupLocation) {
-    console.log('Finding unicorn for ', pickupLocation.Latitude, ', ', pickupLocation.Longitude);
-    return fleet[Math.floor(Math.random() * fleet.length)];
+
+const updateSnippetUserModel = async (email, snippetId, tagArray, summary, user) => {
+    try {
+        const snippetIndex = user.snippetArray.findIndex(snippet => snippet.snippetId === snippetId);
+        
+        // Append new tags in the existing tag array.
+        user.snippetArray[snippetIndex].tagArray = [...new Set([...user.snippetArray[snippetIndex].tagArray, ...tagArray])]; 
+
+        // Update the summary value.
+        user.snippetArray[snippetIndex].summary = summary; 
+        
+        return await updateUser(user);
+
+    } catch (error) {
+        console.error('Error updating user:', error);
+        throw error;
+    }
 }
 
-function recordRide(rideId, username, unicorn) {
-    return ddb.put({
-        TableName: 'Rides',
-        Item: {
-            RideId: rideId,
-            User: username,
-            Unicorn: unicorn,
-            RequestTime: new Date().toISOString(),
-        },
-    }).promise();
+const insertSnippetUserModel = async (user, snippet) => {
+    try {
+        user.snippetArray.push(snippet);
+        return await updateUser(user)
+    } catch (error) {
+        console.error('Error updating user:', error);
+        throw error;
+    }
+    
+}
+const checkIfSnippetExists = async (command) => {
+    // Checks in Snippet model.
+    const params = {
+        TableName: 'SnippetTable',
+        Key: { command }
+    };
+    try {
+        const result = await dynamoDB.get(params).promise();
+        return result?.Item?.snippetId // Returns true if snippet exists, null |undefined otherwise.
+    } catch (error) {
+        console.error(`Error checking snippet existence: ${error.message}`);
+        throw new Error('Error checking snippet existence');
+    }
+};
+
+const updateUser = async (user) => {
+    const params = {
+        TableName: 'UsersTable',
+        Key: { email: user.email },
+        UpdateExpression: 'SET snippetArray = :sa',
+        ExpressionAttributeValues: {
+            ':sa': user.snippetArray.map(snippet => snippet.toItem())
+        }
+    };
+    try {
+        return await dynamoDB.update(params).promise();
+    } catch (error) {
+        console.error(`Error updating user: ${error.message}`);
+        throw new Error('Error updating user');
+    }
 }
 
-function toUrlString(buffer) {
-    return buffer.toString('base64')
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=/g, '');
-}
+const checkIfSnippetExistsUser = async (email, snippetId) => {
+    const params = {
+        TableName: 'UsersTable',
+        Key: { email }
+    };
+
+    try {
+        const result = await dynamoDB.get(params).promise();
+        if (!result.Item) {
+            throw new Error('User not found');
+        }
+
+        const user = new UserModel(result.Item.email, result.Item.snippetArray);
+        return user.snippetArray.some(snippet => snippet.snippetId === snippetId);  // Returns true if a copy of snippet exist.
+    } catch (error) {
+        console.error(`Error checking snippetId for user: ${error.message}`);
+        throw error;
+    }
+};
+
+const checkIfUserExists = async (email) => {
+    const params = {
+        TableName: 'UsersTable',
+        Key: { email }
+    };
+
+    try {
+        const result = await dynamoDB.get(params).promise();
+        return result.Item ? new UserModel(result.Item?.email, result.Item?.snippetArray) : null; // Returns user if user exists, false otherwise
+    } catch (error) {
+        console.error(`Error checking user existence: ${error.message}`);
+        throw new Error('Error checking user existence');
+    }
+};
+
+const createUser = async (email) => {
+    try {
+        const userModel = new UserModel(email);
+        const params = {
+            TableName: 'UsersTable',
+            Item: userModel.toItem()
+        };
+        return await dynamoDB.put(params).promise();
+        return {
+            statusCode: 200,
+            body: JSON.stringify('User created successfully')
+        };
+    } catch (error) {
+        return {
+            statusCode: 500,
+            body: JSON.stringify(`Error creating user: ${error.message}`)
+        };
+    }
+};
+
+const createSnippet = async (snippetId, command, summary, tagArray) => {
+    try {
+        const dataModel = new SnippetModel(snippetId, command, summary, tagArray);
+        const params = {
+            TableName: 'SnippetTable',
+            Item: dataModel.toItem()
+        };
+
+        return await dynamoDB.put(params).promise();
+        // return {
+        //     statusCode: 200,
+        //     body: JSON.stringify('Item created successfully')
+        // };
+    } catch (error) {
+        return {
+            statusCode: 500,
+            body: JSON.stringify(`Error creating item: ${error.message}`)
+        };
+    }
+};
+
+
+
 
 function errorResponse(errorMessage, awsRequestId, callback) {
   callback(null, {
@@ -195,95 +328,3 @@ function errorResponse(errorMessage, awsRequestId, callback) {
   });
 }
 
-const createItem = async (snippetId, command, summary, tagArray) => {
-    try {
-        const dataModel = new SnippetModel(snippetId, command, summary, tagArray);
-        const params = {
-            TableName: 'YourTableName',
-            Item: dataModel.toItem()
-        };
-
-        await dynamoDB.put(params).promise();
-        return {
-            statusCode: 200,
-            body: JSON.stringify('Item created successfully')
-        };
-    } catch (error) {
-        return {
-            statusCode: 500,
-            body: JSON.stringify(`Error creating item: ${error.message}`)
-        };
-    }
-};
-
-const getItem = async (snippetId) => {
-    const params = {
-        TableName: 'YourTableName',
-        Key: { snippetId }
-    };
-
-    try {
-        const result = await dynamoDB.get(params).promise();
-        return {
-            statusCode: 200,
-            body: JSON.stringify(result.Item)
-        };
-    } catch (error) {
-        return {
-            statusCode: 500,
-            body: JSON.stringify(`Error getting item: ${error.message}`)
-        };
-    }
-};
-
-const updateItem = async (snippetId, command, summary, tagArray) => {
-    const params = {
-        TableName: 'YourTableName',
-        Key: { snippetId },
-        UpdateExpression: 'set #command = :command, #summary = :summary, #tags = :tags',
-        ExpressionAttributeNames: {
-            '#command': 'command',
-            '#summary': 'summary',
-            '#tags': 'tag-array'
-        },
-        ExpressionAttributeValues: {
-            ':command': command,
-            ':summary': summary,
-            ':tags': tagArray
-        },
-        ReturnValues: 'UPDATED_NEW'
-    };
-
-    try {
-        const result = await dynamoDB.update(params).promise();
-        return {
-            statusCode: 200,
-            body: JSON.stringify(`Item updated successfully: ${JSON.stringify(result.Attributes)}`)
-        };
-    } catch (error) {
-        return {
-            statusCode: 500,
-            body: JSON.stringify(`Error updating item: ${error.message}`)
-        };
-    }
-};
-
-const deleteItem = async (snippetId) => {
-    const params = {
-        TableName: 'YourTableName',
-        Key: { snippetId }
-    };
-
-    try {
-        await dynamoDB.delete(params).promise();
-        return {
-            statusCode: 200,
-            body: JSON.stringify('Item deleted successfully')
-        };
-    } catch (error) {
-        return {
-            statusCode: 500,
-            body: JSON.stringify(`Error deleting item: ${error.message}`)
-        };
-    }
-};
