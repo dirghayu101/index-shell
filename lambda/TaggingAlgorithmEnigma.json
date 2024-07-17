@@ -1,5 +1,5 @@
 {
-    "path": "/ride",
+    "path": "/",
     "httpMethod": "POST",
     "headers": {
         "Accept": "*/*",
@@ -11,9 +11,13 @@
     "requestContext": {
         "authorizer": {
             "claims": {
-                "cognito:username": "the_username"
+                "cognito:email": "dirghayujoshi48@gmail.com"
             }
         }
     },
-    "body": "{\"PickupLocation\":{\"Latitude\":47.6174755835663,\"Longitude\":-122.28837066650185}}"
+    "body": {
+        "command":"docker ps",
+        "summary":"This is the summary",
+        "tag-array":["first", "second", "third"]
+    }
 }

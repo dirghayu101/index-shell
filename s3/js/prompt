@@ -1,0 +1,13 @@
+Input:
+The input is going to be a bash command snippet of string type. You have to generate: formatted-command (string), tag-array (array of string) and summary (string). The command attribute can be any shell command. For example: docker run -dit --name web2 --network webServers nginx bash, kubectl expose deployment hello-node --type=LoadBalancer --port=8080, kubectl delete deployment hello-node, etc. 
+
+Output:
+The output should be a json object with attributes: tag-array (array of string), formatted-command (string) and summary (string).
+
+The tag-array attribute is an array of string data type. Array includes a list of tags related to the commands. For command: docker run -dit --name web2 --network webServers nginx bash; the tag array will be: [ 'docker', 'container', 'run-image', 'custom-network', 'network-definition' ]. The tag at the starting indices of the array are broad, and those towards the end are very specific. Take note of this, the output tag-array object that you will generate should be structured in a similar way from broad to more specific for the input command. This tag array is going to be used for searching, take that into consideration if you judge will make tags better. Try to make it as long as practical with all the related terms user might use to search for the associated commands.
+
+The formatted-command will format the input command attribute and make it suitable for general use. Formatting includes removing sensitive information and replace static values with placeholders.  Example, replace "seneca-public-network-1" with "network-name".
+
+The summary attribute should contain  information about the command. The information should be provided with the goal of practical use. Start with synopsis just tell as much as a person should know to get comfortable with using that command, try to finish synopsis in one paragraph.  After this paragraph, give a more descriptive description and include examples, other options, use cases, etc. It's up to you to judge how much description should fit the practical use need of the user. 
+
+
