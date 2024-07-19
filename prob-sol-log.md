@@ -6,3 +6,10 @@
 
 - Prob: Getting all commands -> have to create separate endpoints.
     - Sol:  Have a common term like enigma, which will be added to every array. 
+
+
+- Prob: Response is timing out, Gemini API is too slow. 
+
+- Prob: Google's required packages are not there.
+
+- Prob: Local version 
