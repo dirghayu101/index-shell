@@ -255,6 +255,7 @@ const checkIfSnippetExists = async (command) => {
   try {
     const { Items } = await dynamoDB.scan(params).promise();
     // Returns snippetId if snippet exists, null otherwise.
+    console.log("Items value returned in checkIfSnippetExists: ", Items, Items['0'])
     return Items["0"]?.snippetId || null;
   } catch (error) {
     console.error(`Error checking snippet existence: ${error.message}`);
