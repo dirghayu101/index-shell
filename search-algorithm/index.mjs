@@ -54,8 +54,7 @@ export const handler = async (event, context, callback) => {
 
   const email = event.requestContext.authorizer.claims["cognito:email"];
 
-  const searchTerm =
-    event.queryStringParameters && event.queryStringParameters.searchTerm;
+  const searchTerm = event?.queryStringParameters?.searchTerm;
 
   if (!searchTerm) {
     errorResponse(
@@ -67,10 +66,10 @@ export const handler = async (event, context, callback) => {
     return;
   }
 
-  console.log("Query parameter ", searchTerm);
+  console.log("Query parameters: ", searchTerm);
 
-  // Validation for the received command.
-  const searchTermArr = searchTerm.split(" ");
+  // Format and process the search term.
+  const searchTermArr = formatInput(searchTerm);
   const { error } = validationSchema.validate(searchTermArr);
   if (error) {
     console.error("Validation error: ", error);
@@ -81,8 +80,23 @@ export const handler = async (event, context, callback) => {
   try {
     let user = await checkIfUserExists(email);
 
+    let userTableResult = undefined;
     // User creation if user doesn't exist.
-    if (!user) {
+    if (user) {
+      // Step 2: Search the User table. You will only do this when the user exist.
+      let { snippetArray } = user;
+
+      snippetArray = formatArrayResult(snippetArray);
+      console.log("The snippet array is: ", snippetArray);
+       userTableResult = snippetArray.filter((snippet) =>
+        searchTermArr.some(
+          (term) =>
+            snippet.command.includes(term) ||
+            snippet.summary.includes(term) ||
+            snippet.tagArray.some((tag) => tag.includes(term))
+        )
+      );
+    } else {
       responseMessage = responseMessage.concat(
         "User doesn't exist in the DB, creating user."
       );
@@ -98,43 +112,13 @@ export const handler = async (event, context, callback) => {
       responseMessage = responseMessage.concat("User created.");
       user = new UserModel(email, []);
     }
-
-    // Step 2: Search the User table.
-    const { snippetArray } = user;
-
-    console.log("The snippet array is: ", snippetArray)
-
-    const userTableResult = snippetArray.filter((snippet) =>
-      searchTermArr.some(
-        (term) =>
-          snippet.command.includes(term) ||
-          snippet.summary.includes(term) ||
-          snippet.tagArray.some((tag) => tag.includes(term))
-      )
-    );
+    console.log("Value retrieved from the user snippet database: ", userTableResult)
 
     // Step 3: Search the Snippet table.
-    const promises = searchTermArr.map((term) => {
-      const params = {
-        TableName: "Snippet",
-        FilterExpression: "contains(#text, :term)",
-        ExpressionAttributeNames: { "#text": "text" },
-        ExpressionAttributeValues: { ":term": term },
-      };
-      return dynamoDB.scan(params).promise();
-    });
-
-    const results = await Promise.all(promises);
-
-    //   Aggregate results from
-    const snippetTableResult = results.reduce((acc, result) => {
-      return acc.concat(result.Items);
-    }, []);
-
-    // Step 4: Override values retrieved from Snippet table with values received from Snippet table.
+    const snippetTableResult = await searchDatabase(searchTermArr);
     const searchResult = mergeObjectArrays(userTableResult, snippetTableResult);
 
-    // Step 5: Send the response.
+  
     callback(null, {
       statusCode: 200,
       body: JSON.stringify({
@@ -156,6 +140,30 @@ export const handler = async (event, context, callback) => {
   }
 };
 
+const formatArrayResult = (inputArray) => {
+  return inputArray.map(obj => obj.snippetId)
+}
+
+const searchDatabase = async (terms) => {
+  const promises = terms.map((term) => {
+    const params = {
+      TableName: "Snippet",
+      FilterExpression: "contains(tagArray, :term)",
+      ExpressionAttributeValues: { ":term": term },
+    };
+    return dynamoDB.scan(params).promise();
+  });
+
+  const results = await Promise.allSettled(promises);
+  const successfulResults = results
+    .filter(result => result.status === "fulfilled")
+    .map(result => result.value.Items);
+
+  console.log("Successful results values", successfulResults)
+  const allItems = successfulResults.flat();
+  return allItems;
+};
+
 const mergeObjectArrays = (userTableResult, snippetTableResult) => {
   // Create a Map to hold objects by snippetId from userTableResult
   const resultMap = new Map();
@@ -172,6 +180,11 @@ const mergeObjectArrays = (userTableResult, snippetTableResult) => {
   // Convert the resultMap values to an array and return it
   return Array.from(resultMap.values());
 };
+
+function formatInput(input) {
+  const wordsArray = input.trim().split(/\s+/);
+  return wordsArray;
+}
 
 const checkIfUserExists = async (email) => {
   const params = {

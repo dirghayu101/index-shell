@@ -23,7 +23,8 @@ class SnippetModel {
     }
 
     static isValid(snippet) {
-        const { snippetId, command, summary, tagArray } = snippet;
+        console.log("Snippet value received: ", snippet)
+        const { summary, snippetId, command, tagArray } = snippet;
         let valid = typeof snippetId === 'string' &&
                typeof command === 'string' &&
                typeof summary === 'string' &&
@@ -35,6 +36,15 @@ class SnippetModel {
         return valid;
     }
 }
+
+const snippetToObj = (snippetId, command, summary, tagArray) => {
+    return {
+      snippetId,
+      command,
+      summary,
+      tagArray,
+    };
+  };
 
 export class UserModel {
     constructor(email, snippetArray = []) {
@@ -50,7 +60,7 @@ export class UserModel {
     toItem() {
         return {
             email: this.email,
-            snippetArray: this.snippetArray.map(snippet => snippet.toItem())
+            snippetArray: this.snippetArray.map((snippet) => snippetToObj({ ...snippet }))
         };
     }
 }
