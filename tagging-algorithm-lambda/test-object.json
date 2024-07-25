@@ -1,19 +1,21 @@
 {
-    "path": "/",
-    "httpMethod": "POST",
-    "headers": {
-      "Accept": "*/*",
-      "Authorization": "eyJraWQiOiJLTzRVMWZs",
-      "content-type": "application/json; charset=UTF-8"
-    },
-    "queryStringParameters": null,
-    "pathParameters": null,
-    "requestContext": {
-      "authorizer": {
-        "claims": {
-          "cognito:email": "dirghayujoshi48@gmail.com"
-        }
+  "path": "/",
+  "httpMethod": "GET",
+  "headers": {
+    "Accept": "*/*",
+    "Authorization": "eyJraWQiOiJLTzRVMWZs",
+    "content-type": "application/json; charset=UTF-8"
+  },
+  "queryStringParameters": {
+    "searchTerm": "docker ps"
+  },
+  "pathParameters": null,
+  "requestContext": {
+    "authorizer": {
+      "claims": {
+        "cognito:email": "dirghayujoshi48@gmail.com"
       }
-    },
-    "body": "{\n\"command\":\"docker ps\",\n\"summary\":\"This is the summary\",\n\"tagArray\":[\"first\", \"second\", \"fifth\"]\n}"
-  }
+    }
+  },
+  "body": null
+}

@@ -32,6 +32,8 @@ If a user wants to perform a search, we will first perform the search in the use
 
     - Snippet will be copied as it is.
 
+    - Snippet table is the immutable single source of truth.
+
 # Possible corner cases: 
     - command snippet formatting eg ls -al & ls -la have the same functionality but will be treated as two different snippets. 
     - Snippet with some values like: aws configure --profile somePersonalProfile
@@ -58,23 +60,18 @@ If a user wants to perform a search, we will first perform the search in the use
 - Dirghayu Joshi
 */
 
-import { randomBytes } from 'crypto';
-import AWS from 'aws-sdk';
-import { SnippetModel } from './SnippetModel.mjs';
-import { UserModel } from './UserModel.mjs';
-import { GenerateSnippet } from './gemini.mjs';
-import Joi from 'joi';
+import { randomBytes } from "crypto";
+import AWS from "aws-sdk";
+import { SnippetModel } from "./SnippetModel.mjs";
+import { UserModel } from "./UserModel.mjs";
+import { GenerateSnippet } from "./gemini.mjs";
 
 const dynamoDB = new AWS.DynamoDB.DocumentClient();
-const validationSchema = Joi.object({
-  command: Joi.string().required(),
-  summary: Joi.string(),
-  tagArray: Joi.array().items(Joi.string()),
-})
-let responseMessage = "Snippet duplicate already exist in the database."
+
+let responseMessage = "Snippet duplicate already exist in the database.";
 
 export const handler = async (event, context, callback) => {
-  
+  // NOTE: Removed for testing tagging algorithm now.
   if (!event.requestContext.authorizer) {
     errorResponse(
       "Authorization not configured",
@@ -83,8 +80,6 @@ export const handler = async (event, context, callback) => {
     );
     return;
   }
-
-
   // Because we're using a Cognito User Pools authorizer, all of the claims
   // included in the authentication token are provided in the request context.
   // This includes the username as well as other attributes.
@@ -97,114 +92,143 @@ export const handler = async (event, context, callback) => {
   const requestBody = JSON.parse(event?.body);
   // NOTE
   console.log("Received Request Body: ", requestBody);
- 
-  // Validation for the received command.
-  const {error} = validationSchema.validate({...requestBody})
-  if(error){
+
+  if (!requestBody.command) {
     // NOTE
-    console.error("Validation error: ", error);
-    errorResponse(
-      "Invalid Values Received",
-      context.awsRequestId,
-      callback
-    );
+    console.error("Validation error. Request body not found.");
+    errorResponse("Invalid Values Received", context.awsRequestId, callback);
     return;
   }
 
-
-
-  const receivedCommand = requestBody?.command;
+  let receivedCommand = requestBody?.command;
   const receivedSummary = requestBody?.summary || "";
   const receivedTagArray = requestBody?.tagArray || [];
-  let generatedCommand = "",
-    generatedSummary = "",
-   generatedTagArray = [];
-  
+  let generatedSummary = "",
+    generatedTagArray = [];
+
   // NOTE
   console.log("The received command is: ", receivedCommand);
 
-  // What if command already exist in the Snippet database?
-  // If there will be any tag value or summary value sent along with command, those will be inserted in the user model along with command, if there already is a definition in the user model as well, then just override it with the latest received definition of summary, and append new tag values at the top of the array.
-
+ 
   try {
-    const generatedSnippetId = toUrlString(randomBytes(16));
-    let snippetId = await checkIfSnippetExists(receivedCommand);
-    if (!snippetId) {
+    // Scans only the snippet table. Snippet table is the immutable single source of truth.
+    let snippetValue = await checkIfSnippetExists(receivedCommand);
+    let snippetId = undefined;
+    if(snippetValue){
+      // Storing these values because snippet value exist in the snippet database but might not in the user database.
+      ({
+        snippetId,
+        tagArray: generatedTagArray,
+        summary: generatedSummary,
+      } = snippetValue);
+    }else {
       // Case: Snippet doesn't exist.
       // retrieval-augmented generation (RAG)
-
-      responseMessage = "Snippet copy doesn't exist in the database."
-      snippetId = generatedSnippetId;
-
+      responseMessage = "Snippet copy doesn't exist in the database.";
+      snippetId = toUrlString(randomBytes(16));
       // Destructuring the received object and storing their values in already declared values.
-      ({'tag-array': generatedTagArray, 
-        'formatted-command':generatedCommand,
-        summary:generatedSummary,
-      } = await GenerateSnippet(receivedCommand));
+      const genSnipObj = await GenerateSnippet(receivedCommand);
+      if (genSnipObj) {
+        ({
+          "tag-array": generatedTagArray,
+          "formatted-command": receivedCommand,
+          summary: generatedSummary,
+        } = genSnipObj);
+      }
 
       await createSnippet(
         snippetId,
-        generatedCommand,
+        receivedCommand,
         generatedSummary,
-        generatedTagArray 
+        generatedTagArray
       );
 
-      responseMessage = responseMessage.concat("Snippet processed and added to database successfully.")
-    }
+      responseMessage = responseMessage.concat(
+        "Snippet processed and added to database successfully."
+      );
+    } 
 
-    // At this point. Snippet should exist regardless. We only have to worry about User Model here.
+    // At this point. Snippet should exist regardless. 
+    // The snippet 
     // Case: When user doesn't enter any custom summary or tags.
 
     const userModelSummary = receivedSummary || generatedSummary;
-    const userModelTagArray = (generatedTagArray).concat(receivedTagArray);
 
+    // NOTE: Error prone: 
+    const userModelTagArray = Array.isArray(generatedTagArray) 
+    ? generatedTagArray.concat(receivedTagArray) 
+    : console.error("Generated tag array is invalid.", generatedTagArray, "Received tag array value:", receivedTagArray);
+    
+   
     // Old snippet doesn't matter.
-    const snippetData = new SnippetModel(
+    let snippetData = new SnippetModel(
       snippetId,
       receivedCommand,
       userModelSummary,
       userModelTagArray
     );
+    console.log("Snippet data that is going to be pushed into the user model is: ", typeof snippetData)
 
     let user = await checkIfUserExists(email);
+
     if (!user) {
-      responseMessage = responseMessage.concat("User doesn't exist in the DB, creating user.")
-      await createUser(email);
-      responseMessage = responseMessage.concat("User created.")
-      user = new UserModel(email, [snippetData])
-    }
-    
-
-// snippet.snippetId === snippetId
-
-    const checkIfSnippetExistsUser =  user?.snippetArray.some((snippet) => snippet.snippetId === snippetId);
-
-    console.log("Value of checkIfSnippetExistUser variable: ", checkIfSnippetExistsUser)
-    if (checkIfSnippetExistsUser) {
-      // Case: Snippet already exist in the user model.
-      console.log("Case: Snippet already exist in the user model.");
-      responseMessage = responseMessage.concat("Snippet copy already exist in the user database.");
-      user = updateSnippetUserModel(
-        email,
-        snippetId,
-        userModelTagArray,
-        userModelSummary,
-        user
+      responseMessage = responseMessage.concat(
+        "User doesn't exist in the DB, creating user."
       );
-    } else {
-      console.log("Case: Snippet doesn't exist in the user model.");
-      responseMessage = responseMessage.concat("Snippet doesn't exist local to user. Creating a copy.");
-      user.snippetArray.push(snippetData);
-    }
+      await createUser(email);
+      responseMessage = responseMessage.concat("User created.");
+      user = new UserModel(email, [snippetData]);
+      //  NOTE: Possible breakage.
+      console.log("After user creation, the user will be: ", user);
+    } 
+    
+    // This block will be executed if the user already exist in the database.
+    else {
+      // NOTE: Possible breakage.
+      console.log("User's snippet array value currently: ", user.snippetArray, "The type of this value is: ", typeof user.snippetArray)
+      console.log("After object.values method: ", Object.values(user.snippetArray));
+      const tempUserObjStore = user.snippetArray.map(obj => obj.snippetId) 
+      console.log("The value of user snippet array modified is: ", tempUserObjStore);
+      user = new UserModel(user.email, tempUserObjStore)
+      // Check if user has a copy of received command.
+      const checkIfSnippetExistsUser = user?.snippetArray.some(
+        (snippet) => snippet.snippetId === snippetId
+      );
 
+      console.log(
+        "checkIfSnippetExistsUser will check if the snippet ID received from the snippet table command matches with any snippet ID in the user table. Value of checkIfSnippetExistUser: ",
+        checkIfSnippetExistsUser
+      );
+
+      if (checkIfSnippetExistsUser) {
+        // Case: Snippet already exist in the user model.
+        console.log("Case: Snippet already exist in the user model.");
+        responseMessage = responseMessage.concat(
+          "Snippet copy already exist in the user database."
+        );
+        user = updateSnippetUserModel(
+          receivedCommand,
+          snippetId,
+          receivedTagArray,
+          receivedSummary,
+          user
+        );
+      } else {
+        console.log("Case: Snippet doesn't exist in the user model.");
+        responseMessage = responseMessage.concat(
+          "Snippet doesn't exist local to user. Creating a copy."
+        );
+        user.snippetArray.push(snippetData);
+      }
+    }
     await updateUser(user);
-    responseMessage = responseMessage.concat("Updated user successfully!")
+    responseMessage = responseMessage.concat("Updated user successfully!");
     callback(null, {
       statusCode: 201,
       body: JSON.stringify({
         message: responseMessage,
         snippetId: snippetId,
-        snippetData
+        snippetData,
       }),
       headers: {
         "Access-Control-Allow-Origin": "*",
@@ -212,36 +236,34 @@ export const handler = async (event, context, callback) => {
     });
   } catch (error) {
     console.error("An error occurred: ", error);
-    errorResponse(
-      "Main handler error.",
-      context.awsRequestId,
-      callback
-    );
+    errorResponse("Main handler error.", context.awsRequestId, callback);
     return;
   }
 };
 
+// NOTE: Possible breakage point.
 // Working.
 const updateSnippetUserModel = (
-  email,
+  command,
   snippetId,
   tagArray,
   summary,
   user
 ) => {
-    console.log("The value of user in updateSnippetUserModel is: ", user);
-    const snippetIndex = user.snippetArray.findIndex(
-      (snippet) => snippet.snippetId === snippetId
-    );
-    // Append new tags to the existing tag array.
-    user.snippetArray[snippetIndex].tagArray = [
-      ...new Set([...user.snippetArray[snippetIndex].tagArray, ...tagArray]),
-    ];
+  console.log("The value of user in updateSnippetUserModel is: ", user);
+  const snippetIndex = user.snippetArray.findIndex(
+    (snippet) => snippet.snippetId === snippetId
+  );
+  // Append new tags to the existing tag array.
+  user.snippetArray[snippetIndex].tagArray = [
+    ...new Set([...user.snippetArray[snippetIndex].tagArray, ...tagArray]),
+  ];
 
-    // Override the summary value.
-    user.snippetArray[snippetIndex].summary = summary;
-    console.log("After invoking updateSnippetUserModel method, user is:", user);
-    return user;
+  user.snippetArray[snippetIndex].command = command;
+  // Override the summary value.
+  user.snippetArray[snippetIndex].summary = summary;
+  console.log("After invoking updateSnippetUserModel method, user is:", user);
+  return user;
 };
 
 // Working!
@@ -253,10 +275,9 @@ const checkIfSnippetExists = async (command) => {
     ExpressionAttributeValues: { ":command": command },
   };
   try {
-    const { Items } = await dynamoDB.scan(params).promise();
+    const {Items} = await dynamoDB.scan(params).promise();
     // Returns snippetId if snippet exists, null otherwise.
-    console.log("Items value returned in checkIfSnippetExists: ", Items, Items['0'])
-    return Items["0"]?.snippetId || null;
+    return Items[0]|| null;
   } catch (error) {
     console.error(`Error checking snippet existence: ${error.message}`);
     return null;
@@ -265,23 +286,17 @@ const checkIfSnippetExists = async (command) => {
 };
 
 
-const snippetToObj = (snippetId, command, summary, tagArray) => {
-  return {
-    snippetId,
-    command,
-    summary,
-    tagArray
-};
-}
-
 // Working!
 const updateUser = async (user) => {
+  // NOTE: Breaking.
+  let {snippetArray: modSnipArr} = user.toItem();
+  console.log("The modSnipArray that is going to be updated in the user table is: ", modSnipArr)
   const params = {
     TableName: "User",
     Key: { email: user.email },
     UpdateExpression: "SET snippetArray = :sa",
     ExpressionAttributeValues: {
-      ":sa": user.snippetArray.map((snippet) => snippetToObj({...snippet})),
+      ":sa": modSnipArr,
     },
   };
   try {
@@ -294,8 +309,6 @@ const updateUser = async (user) => {
     throw new Error("Error updating user");
   }
 };
-
-
 
 const checkIfUserExists = async (email) => {
   const params = {
@@ -369,4 +382,3 @@ function toUrlString(buffer) {
     .replace(/\//g, "_")
     .replace(/=/g, "");
 }
-

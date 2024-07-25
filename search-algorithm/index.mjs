@@ -1,4 +1,5 @@
 /*
+/*
                     SearchAlgorithm.mjs
 
 This algorithm will perform search operation on the User and Snippet table. 
@@ -100,6 +101,8 @@ export const handler = async (event, context, callback) => {
 
     // Step 2: Search the User table.
     const { snippetArray } = user;
+
+    console.log("The snippet array is: ", snippetArray)
 
     const userTableResult = snippetArray.filter((snippet) =>
       searchTermArr.some(

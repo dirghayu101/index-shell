@@ -1,0 +1,23 @@
+{
+    "path": "/",
+    "httpMethod": "GET",
+    "headers": {
+      "Accept": "*/*",
+      "Authorization": "eyJraWQiOiJLTzRVMWZs",
+      "content-type": "application/json; charset=UTF-8"
+    },
+    "queryStringParameters": {
+      "param1": "value1",
+      "param2": "value2"
+    },
+    "pathParameters": null,
+    "requestContext": {
+      "authorizer": {
+        "claims": {
+          "cognito:email": "dirghayujoshi48@gmail.com"
+        }
+      }
+    },
+    "body": null
+  }
+  

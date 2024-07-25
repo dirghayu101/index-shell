@@ -36,7 +36,7 @@ const safetySetting = [
 
 
 // Main function.
-export const GenerateSnippet = async (command, maxRetries = 4, delay = 1) => {
+export const GenerateSnippet = async (command, maxRetries = 3, delay = 1) => {
   let retryCount = 0;
   delay = retryCount > delay ? retryCount : delay;
   while (retryCount < maxRetries) {
