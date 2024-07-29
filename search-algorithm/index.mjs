@@ -1,5 +1,4 @@
 /*
-/*
                     SearchAlgorithm.mjs
 
 This algorithm will perform search operation on the User and Snippet table. 
@@ -42,18 +41,7 @@ const validationSchema = Joi.array()
 let responseMessage = "";
 
 export const handler = async (event, context, callback) => {
-  if (!event.requestContext.authorizer) {
-    errorResponse(
-      401,
-      "Authorization not configured",
-      context.awsRequestId,
-      callback
-    );
-    return;
-  }
-
-  const email = event.requestContext.authorizer.claims["cognito:email"];
-
+  const email = event?.queryStringParameters?.userId;
   const searchTerm = event?.queryStringParameters?.searchTerm;
 
   if (!searchTerm) {

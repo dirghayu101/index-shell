@@ -72,24 +72,9 @@ let responseMessage = "Snippet duplicate already exist in the database.";
 
 export const handler = async (event, context, callback) => {
   // NOTE: Removed for testing tagging algorithm now.
-  if (!event.requestContext.authorizer) {
-    errorResponse(
-      "Authorization not configured",
-      context.awsRequestId,
-      callback
-    );
-    return;
-  }
-  // Because we're using a Cognito User Pools authorizer, all of the claims
-  // included in the authentication token are provided in the request context.
-  // This includes the username as well as other attributes.
-  const email = event.requestContext.authorizer.claims["cognito:email"];
-
-  // The body field of the event in a proxy integration is a raw string.
-  // In order to extract meaningful values, we need to first parse this string
-  // into an object. A more robust implementation might inspect the Content-Type
-  // header first and use a different parsing strategy based on that value.
-  const requestBody = JSON.parse(event?.body);
+  console.log("The event is: ", event, "\n\n\n")
+  const email = event.email;
+  const requestBody = event;
   // NOTE
   console.log("Received Request Body: ", requestBody);
 
@@ -167,6 +152,8 @@ export const handler = async (event, context, callback) => {
       userModelSummary,
       userModelTagArray
     );
+
+    console.log("Snippet data that is going to be worked on and is causing possible issues: ", snippetData)
     console.log("Snippet data that is going to be pushed into the user model is: ", typeof snippetData)
 
     let user = await checkIfUserExists(email);
