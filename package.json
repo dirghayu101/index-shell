@@ -1,5 +1,0 @@
-{
-  "dependencies": {
-    "lambda": "file:lambda"
-  }
-}
